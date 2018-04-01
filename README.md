@@ -4,7 +4,7 @@
 
 1. [引言](summary.md)
 
-1. [动画捕捉](chapter02.md)
+1. [视频截图](MakingScreencaps.md)
 
 1. [屏幕输出](chapter03.md)
 

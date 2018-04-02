@@ -1,9 +1,15 @@
-all: tutorial01
+all: out tutorial01 tutorial02
 
-tutorial01: 01/tutorial01.c
-	mkdir -p 01/out
-	cp 01/samplempg.mp4 01/out/samplempg.mp4
-	gcc -o 01/out/tutorial01 01/tutorial01.c -lavutil -lavformat -lavcodec -lswscale -lm -lz
-	
+out:
+	mkdir -p out
+
+tutorial01: tutorial01.c
+	cp samplempg.mp4 out/samplempg.mp4
+	gcc -o out/tutorial01 tutorial01.c -lavutil -lavformat -lavcodec -lswscale -lm -lz
+
+tutorial02: tutorial02.c
+	cp samplempg.mp4 out/samplempg.mp4
+	gcc -o out/tutorial02 tutorial02.c -lavutil -lavformat -lavcodec -lswscale -lm -lz -lSDL
+
 clean:
-	rm -rf 01/out
+	rm -rf out

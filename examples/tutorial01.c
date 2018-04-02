@@ -11,12 +11,12 @@
 // http://www.ffmpeg.org/doxygen/3.4/decode_video_8c-example.html
 // https://github.com/mpenkov/ffmpeg-tutorial/blob/master/tutorial01.c
 
+#include <stdio.h>
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
-
-#include <stdio.h>
 
 static const char *src_filename = NULL;
 
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
 
   if (argc < 2)
   {
-    printf("Please provide a movie file.\n");
+    fprintf(stdout, "Usage: tutorial01 <file>\n");
     return -1;
   }
   src_filename = argv[1];
@@ -71,13 +71,13 @@ int main(int argc, char *argv[])
   // 打开视频文件输入流，必须使用avformat_close_input关闭文件流
   if (avformat_open_input(&pFormatCtx, src_filename, NULL, NULL) != 0)
   {
-    av_log(NULL, AV_LOG_ERROR, "Couldn't open file.\n");
+    fprintf(stderr, "Couldn't open file.\n");
     return -1;
   }
   // 检索流信息
   if (avformat_find_stream_info(pFormatCtx, NULL) < 0)
   {
-    av_log(NULL, AV_LOG_ERROR, "Couldn't find stream information.\n");
+    fprintf(stderr, "Couldn't find stream information.\n");
     return -1;
   }
 
@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
     }
   if (videoStream == -1)
   {
-    av_log(NULL, AV_LOG_ERROR, "Didn't find a video stream.\n");
+    fprintf(stderr, "Didn't find a video stream.\n");
     return -1;
   }
 
@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
   pCodec = avcodec_find_decoder(pFormatCtx->streams[videoStream]->codecpar->codec_id);
   if (pCodec == NULL)
   {
-    av_log(NULL, AV_LOG_ERROR, "Unsupported codec!\n");
+    fprintf(stderr, "Unsupported codec!\n");
     return -1;
   }
 
@@ -114,21 +114,21 @@ int main(int argc, char *argv[])
   pCodecCtx = avcodec_alloc_context3(pCodec);
   if (!pCodecCtx)
   {
-    av_log(NULL, AV_LOG_ERROR, "Failed to allocate the codec context\n");
+    fprintf(stderr, "Failed to allocate the codec context\n");
     return -1;
   }
 
   // 复制输入流的编解码器的参数到输出编解码器上下文中
   if (avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[videoStream]->codecpar) < 0)
   {
-    av_log(NULL, AV_LOG_ERROR, "Failed to copy codec parameters to decoder context\n");
+    fprintf(stderr, "Failed to copy codec parameters to decoder context\n");
     return -1;
   }
 
   // 打开编解码器
   if (avcodec_open2(pCodecCtx, pCodec, &optionsDict) < 0)
   {
-    av_log(NULL, AV_LOG_ERROR, "Could not open codec!\n");
+    fprintf(stderr, "Could not open codec!\n");
     return -1;
   }
 
@@ -136,14 +136,14 @@ int main(int argc, char *argv[])
   pFrame = av_frame_alloc();
   if (pFrame == NULL)
   {
-    av_log(NULL, AV_LOG_ERROR, "Allocate AVFrame failed!\n");
+    fprintf(stderr, "Allocate AVFrame failed!\n");
     return -1;
   }
   // 分配一个帧结构用于后续存放RGB图像
   pFrameRGB = av_frame_alloc();
   if (pFrameRGB == NULL)
   {
-    av_log(NULL, AV_LOG_ERROR, "Allocate AVFrame failed!\n");
+    fprintf(stderr, "Allocate AVFrame failed!\n");
     return -1;
   }
 
@@ -205,7 +205,7 @@ int main(int argc, char *argv[])
       ret = avcodec_send_packet(pCodecCtx, &packet);
       if (ret < 0)
       {
-        av_log(NULL, AV_LOG_ERROR, "Error sending a packet for decoding\n");
+        fprintf(stderr, "Error sending a packet for decoding\n");
         exit(1);
       }
       while (ret >= 0)
@@ -217,7 +217,7 @@ int main(int argc, char *argv[])
         }
         else if (ret < 0)
         {
-          av_log(NULL, AV_LOG_ERROR, "Error during decoding\n");
+          fprintf(stderr, "Error during decoding\n");
           exit(1);
         }
 

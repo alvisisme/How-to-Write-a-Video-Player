@@ -1,9 +1,4 @@
 // tutorial01.c
-//
-// This tutorial was written by Stephen Dranger (dranger@gmail.com).
-//
-// Code based on a tutorial by Martin Bohme (boehme@inb.uni-luebeckREMOVETHIS.de)
-
 // 一个简单的程序，展示如何使用libavformat和libavcodec读取视频文件，并
 // 将视频的前５帧数据保存为PPM格式的图片．
 //
@@ -14,6 +9,7 @@
 //
 // 参考文档：
 // http://www.ffmpeg.org/doxygen/3.4/decode_video_8c-example.html
+// https://github.com/mpenkov/ffmpeg-tutorial/blob/master/tutorial01.c
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -45,66 +41,6 @@ void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame)
 
   // 关闭文件
   fclose(pFile);
-}
-
-static int open_video_codec_context(int *stream_idx,
-                              AVCodecContext **dec_ctx, AVFormatContext *fmt_ctx, enum AVMediaType type)
-{
-  int ret, stream_index;
-  AVStream *st;
-  AVCodec *dec = NULL;
-  AVDictionary *opts = NULL;
-
-  ret = av_find_best_stream(fmt_ctx, type, -1, -1, NULL, 0);
-  if (ret < 0)
-  {
-    fprintf(stderr, "Could not find %s stream in input file '%s'\n",
-            av_get_media_type_string(type), src_filename);
-    return ret;
-  }
-  else
-  {
-    stream_index = ret;
-    st = fmt_ctx->streams[stream_index];
-
-    /* find decoder for the stream */
-    dec = avcodec_find_decoder(st->codecpar->codec_id);
-    if (!dec)
-    {
-      fprintf(stderr, "Failed to find %s codec\n",
-              av_get_media_type_string(type));
-      return AVERROR(EINVAL);
-    }
-
-    /* Allocate a codec context for the decoder */
-    *dec_ctx = avcodec_alloc_context3(dec);
-    if (!*dec_ctx)
-    {
-      fprintf(stderr, "Failed to allocate the %s codec context\n",
-              av_get_media_type_string(type));
-      return AVERROR(ENOMEM);
-    }
-
-    /* Copy codec parameters from input stream to output codec context */
-    if ((ret = avcodec_parameters_to_context(*dec_ctx, st->codecpar)) < 0)
-    {
-      fprintf(stderr, "Failed to copy %s codec parameters to decoder context\n",
-              av_get_media_type_string(type));
-      return ret;
-    }
-
-    /* Init the decoders, with or without reference counting */
-    // av_dict_set(&opts, "refcounted_frames", refcount ? "1" : "0", 0);
-    if ((ret = avcodec_open2(*dec_ctx, dec, &opts)) < 0)
-    {
-      fprintf(stderr, "Failed to open %s codec\n",
-              av_get_media_type_string(type));
-      return ret;
-    }
-    *stream_idx = stream_index;
-  }
-
-  return 0;
 }
 
 int main(int argc, char *argv[])
@@ -165,19 +101,30 @@ int main(int argc, char *argv[])
   // 从视频流中获得编解码器上下文的指针
   // 该接口已被废弃(warning: ‘codec’ is deprecated)
   // pCodecCtx = pFormatCtx->streams[videoStream]->codec;
-  if (open_video_codec_context(&videoStream, &pCodecCtx, pFormatCtx, AVMEDIA_TYPE_VIDEO) < 0)
-  {
-    av_log(NULL, AV_LOG_ERROR, "Could not get codec context.\n");
-    return -1;
-  }
 
   // 获得对应的解码器
-  pCodec = avcodec_find_decoder(pCodecCtx->codec_id);
+  pCodec = avcodec_find_decoder(pFormatCtx->streams[videoStream]->codecpar->codec_id);
   if (pCodec == NULL)
   {
     av_log(NULL, AV_LOG_ERROR, "Unsupported codec!\n");
     return -1;
   }
+
+  // 从视频流中获得编解码器上下文的指针
+  pCodecCtx = avcodec_alloc_context3(pCodec);
+  if (!pCodecCtx)
+  {
+    av_log(NULL, AV_LOG_ERROR, "Failed to allocate the codec context\n");
+    return -1;
+  }
+
+  // 复制输入流的编解码器的参数到输出编解码器上下文中
+  if (avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[videoStream]->codecpar) < 0)
+  {
+    av_log(NULL, AV_LOG_ERROR, "Failed to copy codec parameters to decoder context\n");
+    return -1;
+  }
+
   // 打开编解码器
   if (avcodec_open2(pCodecCtx, pCodec, &optionsDict) < 0)
   {
@@ -220,7 +167,7 @@ int main(int argc, char *argv[])
           NULL);
 
   // 把缓冲区中合适的部分指派到pFrameRGB中的图像面板．
-  // TODO:该接口已被废弃(warning: ‘avpicture_fill’ is deprecated) 需要注意的是，AVFrame是AVPicture的一个超集，可以强制转换．
+  // 该接口已被废弃(warning: ‘avpicture_fill’ is deprecated) 需要注意的是，AVFrame是AVPicture的一个超集，可以强制转换．
   // avpicture_fill((AVPicture *)pFrameRGB, buffer, AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
   av_image_fill_arrays(pFrameRGB->data, pFrameRGB->linesize, buffer, AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height, 1);
 

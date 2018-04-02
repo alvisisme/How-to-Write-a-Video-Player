@@ -5,7 +5,7 @@
 // 使用Makefile编译
 //
 // 使用方法：
-// tutorial02 samplempg.mp4
+// tutorial02 sample.mpg
 //
 // 参考文档：
 // http://www.ffmpeg.org/doxygen/3.4/decode_video_8c-example.html
@@ -20,17 +20,20 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_thread.h>
 
+#ifdef __MINGW32__
+#undef main /* Prevents SDL from overriding main() */
+#endif
+
 static const char *src_filename = NULL;
 
 int main(int argc, char *argv[])
 {
   AVFormatContext *pFormatCtx = NULL;
   int i, videoStream;
-  AVCodecContext *pCodecCtx = NULL;
-  AVCodec *pCodec = NULL;
+  AVCodecContext *vCodecCtx = NULL;
+  AVCodec *vCodec = NULL;
   AVFrame *pFrame = NULL;
   AVPacket packet;
-  int frameFinished;
 
   AVDictionary *optionsDict = NULL;
   struct SwsContext *sws_ctx = NULL;
@@ -69,16 +72,18 @@ int main(int argc, char *argv[])
   }
 
   // 将运行过程中的信息全部输出到标准错误中
-  av_dump_format(pFormatCtx, 0, argv[1], 0);
+  av_dump_format(pFormatCtx, 0, src_filename, 0);
 
   // 找到视频流，我们只需要处理视频数据
   videoStream = -1;
   for (i = 0; i < pFormatCtx->nb_streams; i++)
+  {
     if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
     {
       videoStream = i;
       break;
     }
+  }
   if (videoStream == -1)
   {
     fprintf(stderr, "Didn't find a video stream.\n");
@@ -86,30 +91,30 @@ int main(int argc, char *argv[])
   }
 
   // 获得对应的解码器
-  pCodec = avcodec_find_decoder(pFormatCtx->streams[videoStream]->codecpar->codec_id);
-  if (pCodec == NULL)
+  vCodec = avcodec_find_decoder(pFormatCtx->streams[videoStream]->codecpar->codec_id);
+  if (vCodec == NULL)
   {
     fprintf(stderr, "Unsupported codec!\n");
     return -1;
   }
 
   // 从视频流中获得编解码器上下文的指针
-  pCodecCtx = avcodec_alloc_context3(pCodec);
-  if (!pCodecCtx)
+  vCodecCtx = avcodec_alloc_context3(vCodec);
+  if (!vCodecCtx)
   {
     fprintf(stderr, "Failed to allocate the codec context\n");
     return -1;
   }
 
   // 复制输入流的编解码器的参数到输出编解码器上下文中
-  if (avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[videoStream]->codecpar) < 0)
+  if (avcodec_parameters_to_context(vCodecCtx, pFormatCtx->streams[videoStream]->codecpar) < 0)
   {
     fprintf(stderr, "Failed to copy codec parameters to decoder context\n");
     return -1;
   }
 
   // 打开编解码器
-  if (avcodec_open2(pCodecCtx, pCodec, &optionsDict) < 0)
+  if (avcodec_open2(vCodecCtx, vCodec, &optionsDict) < 0)
   {
     fprintf(stderr, "Could not open codec!\n");
     return -1;
@@ -124,7 +129,11 @@ int main(int argc, char *argv[])
   }
 
   // 初始化一个屏幕用于播放视频数据
-  screen = SDL_SetVideoMode(pCodecCtx->width, pCodecCtx->height, 0, 0);
+#ifndef __DARWIN__
+  screen = SDL_SetVideoMode(vCodecCtx->width, vCodecCtx->height, 0, 0);
+#else
+  screen = SDL_SetVideoMode(vCodecCtx->width, vCodecCtx->height, 24, 0);
+#endif
   if (!screen)
   {
     fprintf(stderr, "SDL: could not set video mode - exiting\n");
@@ -132,25 +141,24 @@ int main(int argc, char *argv[])
   }
 
   // 分配空间，在屏幕上存放我们的YUV图像
-  bmp = SDL_CreateYUVOverlay(pCodecCtx->width,
-                             pCodecCtx->height,
+  bmp = SDL_CreateYUVOverlay(vCodecCtx->width,
+                             vCodecCtx->height,
                              SDL_YV12_OVERLAY,
                              screen);
 
   sws_ctx =
       sws_getContext(
-          pCodecCtx->width,
-          pCodecCtx->height,
-          pCodecCtx->pix_fmt,
-          pCodecCtx->width,
-          pCodecCtx->height,
+          vCodecCtx->width,
+          vCodecCtx->height,
+          vCodecCtx->pix_fmt,
+          vCodecCtx->width,
+          vCodecCtx->height,
           AV_PIX_FMT_YUV420P,
           SWS_BILINEAR,
           NULL,
           NULL,
           NULL);
 
-  // Read frames and save first five frames to disk
   i = 0;
   while (av_read_frame(pFormatCtx, &packet) >= 0)
   {
@@ -158,7 +166,7 @@ int main(int argc, char *argv[])
     if (packet.stream_index == videoStream)
     {
       int ret;
-      ret = avcodec_send_packet(pCodecCtx, &packet);
+      ret = avcodec_send_packet(vCodecCtx, &packet);
       if (ret < 0)
       {
         fprintf(stderr, "Error sending a packet for decoding\n");
@@ -166,7 +174,7 @@ int main(int argc, char *argv[])
       }
       while (ret >= 0)
       {
-        ret = avcodec_receive_frame(pCodecCtx, pFrame);
+        ret = avcodec_receive_frame(vCodecCtx, pFrame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
         {
           break;
@@ -193,20 +201,16 @@ int main(int argc, char *argv[])
             (uint8_t const *const *)pFrame->data,
             pFrame->linesize,
             0,
-            pCodecCtx->height,
+            vCodecCtx->height,
             pict.data,
             pict.linesize);
 
         SDL_UnlockYUVOverlay(bmp);
         rect.x = 0;
         rect.y = 0;
-        rect.w = pCodecCtx->width;
-        rect.h = pCodecCtx->height;
-        // 播放前５帧
-        if (++i <= 5)
-        {
-          SDL_DisplayYUVOverlay(bmp, &rect);
-        }
+        rect.w = vCodecCtx->width;
+        rect.h = vCodecCtx->height;
+        SDL_DisplayYUVOverlay(bmp, &rect);
       }
     }
 
@@ -227,7 +231,7 @@ int main(int argc, char *argv[])
   // 释放YUV帧
   av_free(pFrame);
   // 关闭编解码器
-  avcodec_close(pCodecCtx);
+  avcodec_close(vCodecCtx);
   // 关闭视频文件流
   avformat_close_input(&pFormatCtx);
 

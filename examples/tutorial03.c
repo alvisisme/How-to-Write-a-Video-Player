@@ -177,6 +177,9 @@ int audio_decode_frame(AVCodecContext *aCodecCtx, uint8_t *audio_buf, int buf_si
   }
 }
 
+/**
+ * stream是声音数据，len是声音长度
+ */ 
 void audio_callback(void *userdata, Uint8 *stream, int len)
 {
 
@@ -219,12 +222,10 @@ int main(int argc, char *argv[])
 {
   AVFormatContext *pFormatCtx = NULL;
   int i, videoStream, audioStream;
-  AVCodecContext *pCodecCtx = NULL;
-  AVCodec *pCodec = NULL;
+  AVCodecContext *vCodecCtx = NULL;
+  AVCodec *vCodec = NULL;
   AVFrame *pFrame = NULL;
   AVPacket packet;
-  int frameFinished;
-  //float           aspect_ratio;
 
   AVCodecContext *aCodecCtx = NULL;
   AVCodec *aCodec = NULL;
@@ -241,52 +242,87 @@ int main(int argc, char *argv[])
 
   if (argc < 2)
   {
-    fprintf(stderr, "Usage: test <file>\n");
+    fprintf(stdout, "Usage: tutorial03 <file>\n");
     exit(1);
   }
-  // Register all formats and codecs
+  src_filename = argv[1];
+  // 初始化libavformat并注册所有的封装器，解封装器等
   av_register_all();
-
+  // 初始化SDL库
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
   {
     fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
     exit(1);
   }
 
-  // Open video file
-  if (avformat_open_input(&pFormatCtx, argv[1], NULL, NULL) != 0)
-    return -1; // Couldn't open file
-
-  // Retrieve stream information
+  // 打开视频文件输入流，必须使用avformat_close_input关闭文件流
+  if (avformat_open_input(&pFormatCtx, src_filename, NULL, NULL) != 0)
+  {
+    fprintf(stderr, "Couldn't open file.\n");
+    return -1;
+  }
+  // 检索流信息
   if (avformat_find_stream_info(pFormatCtx, NULL) < 0)
-    return -1; // Couldn't find stream information
+  {
+    fprintf(stderr, "Couldn't find stream information.\n");
+    return -1;
+  }
 
-  // Dump information about file onto standard error
+  // 将运行过程中的信息全部输出到标准错误中
   av_dump_format(pFormatCtx, 0, argv[1], 0);
 
-  // Find the first video stream
+  // 找到视频流和音频流
   videoStream = -1;
   audioStream = -1;
   for (i = 0; i < pFormatCtx->nb_streams; i++)
   {
-    if (pFormatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO &&
+    if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
         videoStream < 0)
     {
       videoStream = i;
     }
-    if (pFormatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO &&
+    if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
         audioStream < 0)
     {
       audioStream = i;
     }
   }
   if (videoStream == -1)
-    return -1; // Didn't find a video stream
-  if (audioStream == -1)
+  {
+    fprintf(stderr, "Didn't find a video stream.\n");
     return -1;
+  }
+  if (audioStream == -1)
+  {
+    fprintf(stderr, "Didn't find a audio stream.\n");
+    return -1;
+  }
 
-  aCodecCtx = pFormatCtx->streams[audioStream]->codec;
-  // Set audio settings from codec info
+  /** 开始处理音频流 **/
+
+  // 获得对应的音频解码器
+  aCodec = avcodec_find_decoder(pFormatCtx->streams[audioStream]->codecpar->codec_id);
+  if (aCodec == NULL)
+  {
+    fprintf(stderr, "Unsupported audio codec!\n");
+    return -1;
+  }
+  // 从音频流中获得编解码器上下文的指针
+  aCodecCtx = avcodec_alloc_context3(aCodec);
+  if (!aCodecCtx)
+  {
+    fprintf(stderr, "Failed to allocate the audio codec context\n");
+    return -1;
+  }
+  // 复制输入流的编解码器的参数到输出编解码器上下文中
+  if (avcodec_parameters_to_context(aCodecCtx, pFormatCtx->streams[audioStream]->codecpar) < 0)
+  {
+    fprintf(stderr, "Failed to copy codec parameters to decoder context\n");
+    avformat_close_input(&pFormatCtx);
+    return -1;
+  }
+
+  // 根据编解码器的信息设置音频参数，用于传入SDL库
   wanted_spec.freq = aCodecCtx->sample_rate;
   wanted_spec.format = AUDIO_S16SYS;
   wanted_spec.channels = aCodecCtx->channels;
@@ -300,41 +336,62 @@ int main(int argc, char *argv[])
     fprintf(stderr, "SDL_OpenAudio: %s\n", SDL_GetError());
     return -1;
   }
-  aCodec = avcodec_find_decoder(aCodecCtx->codec_id);
-  if (!aCodec)
+
+  // 打开音频编解码器
+  if (avcodec_open2(aCodecCtx, aCodec, &audioOptionsDict) < 0)
   {
-    fprintf(stderr, "Unsupported codec!\n");
+    fprintf(stderr, "Could not open audio codec!\n");
     return -1;
   }
-  avcodec_open2(aCodecCtx, aCodec, &audioOptionsDict);
 
-  // audio_st = pFormatCtx->streams[index]
   packet_queue_init(&audioq);
   SDL_PauseAudio(0);
 
-  // Get a pointer to the codec context for the video stream
-  pCodecCtx = pFormatCtx->streams[videoStream]->codec;
-
-  // Find the decoder for the video stream
-  pCodec = avcodec_find_decoder(pCodecCtx->codec_id);
-  if (pCodec == NULL)
+  /**开始处理视频数据**/
+  // 获得对应的视频编解码器
+  vCodec = avcodec_find_decoder(pFormatCtx->streams[videoStream]->codecpar->codec_id);
+  if (vCodec == NULL)
   {
-    fprintf(stderr, "Unsupported codec!\n");
-    return -1; // Codec not found
+    fprintf(stderr, "Unsupported video codec!\n");
+    return -1;
   }
-  // Open codec
-  if (avcodec_open2(pCodecCtx, pCodec, &videoOptionsDict) < 0)
-    return -1; // Could not open codec
 
-  // Allocate video frame
+  // 从视频流中获得编解码器上下文的指针
+  vCodecCtx = avcodec_alloc_context3(vCodec);
+  if (!vCodecCtx)
+  {
+    fprintf(stderr, "Failed to allocate the codec context\n");
+    return -1;
+  }
+
+  // 复制输入流的编解码器的参数到输出编解码器上下文中
+  if (avcodec_parameters_to_context(vCodecCtx, pFormatCtx->streams[videoStream]->codecpar) < 0)
+  {
+    fprintf(stderr, "Failed to copy codec parameters to decoder context\n");
+    avformat_close_input(&pFormatCtx);
+    return -1;
+  }
+
+  // 打开视频编解码器
+  if (avcodec_open2(vCodecCtx, vCodec, &videoOptionsDict) < 0)
+  {
+    fprintf(stderr, "Could not open video codec!\n");
+    return -1;
+  }
+
+  // 分配一个数据帧用于存放后续从视频流中获得的帧数据
   pFrame = av_frame_alloc();
+  if (pFrame == NULL)
+  {
+    fprintf(stderr, "Allocate AVFrame failed!\n");
+    return -1;
+  }
 
-  // Make a screen to put our video
-
+    // 初始化一个屏幕用于播放视频数据
 #ifndef __DARWIN__
-  screen = SDL_SetVideoMode(pCodecCtx->width, pCodecCtx->height, 0, 0);
+  screen = SDL_SetVideoMode(vCodecCtx->width, vCodecCtx->height, 0, 0);
 #else
-  screen = SDL_SetVideoMode(pCodecCtx->width, pCodecCtx->height, 24, 0);
+  screen = SDL_SetVideoMode(vCodecCtx->width, vCodecCtx->height, 24, 0);
 #endif
   if (!screen)
   {
@@ -342,41 +399,53 @@ int main(int argc, char *argv[])
     exit(1);
   }
 
-  // Allocate a place to put our YUV image on that screen
-  bmp = SDL_CreateYUVOverlay(pCodecCtx->width,
-                             pCodecCtx->height,
+  // 分配空间，在屏幕上存放我们的YUV图像
+  bmp = SDL_CreateYUVOverlay(vCodecCtx->width,
+                             vCodecCtx->height,
                              SDL_YV12_OVERLAY,
                              screen);
   sws_ctx =
       sws_getContext(
-          pCodecCtx->width,
-          pCodecCtx->height,
-          pCodecCtx->pix_fmt,
-          pCodecCtx->width,
-          pCodecCtx->height,
+          vCodecCtx->width,
+          vCodecCtx->height,
+          vCodecCtx->pix_fmt,
+          vCodecCtx->width,
+          vCodecCtx->height,
           AV_PIX_FMT_YUV420P,
           SWS_BILINEAR,
           NULL,
           NULL,
           NULL);
 
-  // Read frames and save first five frames to disk
   i = 0;
   while (av_read_frame(pFormatCtx, &packet) >= 0)
   {
-    // Is this a packet from the video stream?
+    // 判断数据包是否来自视频流
     if (packet.stream_index == videoStream)
     {
-      // Decode video frame
-      avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished,
-                            &packet);
-
-      // Did we get a video frame?
-      if (frameFinished)
+      int ret;
+      ret = avcodec_send_packet(vCodecCtx, &packet);
+      if (ret < 0)
       {
-        SDL_LockYUVOverlay(bmp);
+        fprintf(stderr, "Error sending a packet for decoding\n");
+        exit(1);
+      }
+      while (ret >= 0)
+      {
+        ret = avcodec_receive_frame(vCodecCtx, pFrame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        {
+          break;
+        }
+        else if (ret < 0)
+        {
+          fprintf(stderr, "Error during decoding\n");
+          exit(1);
+        }
 
-        AVPicture pict;
+        // 一帧读取结束
+        SDL_LockYUVOverlay(bmp);
+        AVFrame pict;
         pict.data[0] = bmp->pixels[0];
         pict.data[1] = bmp->pixels[2];
         pict.data[2] = bmp->pixels[1];
@@ -384,25 +453,22 @@ int main(int argc, char *argv[])
         pict.linesize[0] = bmp->pitches[0];
         pict.linesize[1] = bmp->pitches[2];
         pict.linesize[2] = bmp->pitches[1];
-
-        // Convert the image into YUV format that SDL uses
+        // 将图像从pFrame的原生格式转换到SDL使用的YUV格式
         sws_scale(
             sws_ctx,
             (uint8_t const *const *)pFrame->data,
             pFrame->linesize,
             0,
-            pCodecCtx->height,
+            vCodecCtx->height,
             pict.data,
             pict.linesize);
 
         SDL_UnlockYUVOverlay(bmp);
-
         rect.x = 0;
         rect.y = 0;
-        rect.w = pCodecCtx->width;
-        rect.h = pCodecCtx->height;
+        rect.w = vCodecCtx->width;
+        rect.h = vCodecCtx->height;
         SDL_DisplayYUVOverlay(bmp, &rect);
-        av_free_packet(&packet);
       }
     }
     else if (packet.stream_index == audioStream)
@@ -411,9 +477,9 @@ int main(int argc, char *argv[])
     }
     else
     {
-      av_free_packet(&packet);
+      // 释放由av_read_frame分配内存的数据包的内存
+      av_packet_unref(&packet);
     }
-    // Free the packet that was allocated by av_read_frame
     SDL_PollEvent(&event);
     switch (event.type)
     {
@@ -427,13 +493,12 @@ int main(int argc, char *argv[])
     }
   }
 
-  // Free the YUV frame
+  // 释放YUV帧
   av_free(pFrame);
-
-  // Close the codec
-  avcodec_close(pCodecCtx);
-
-  // Close the video file
+  // 关闭编解码器
+  avcodec_close(aCodecCtx);
+  avcodec_close(vCodecCtx);
+  // 关闭文件流
   avformat_close_input(&pFormatCtx);
 
   return 0;

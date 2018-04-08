@@ -50,15 +50,22 @@ int packet_queue_put(PacketQueue *q, AVPacket *pkt)
 {
 
   AVPacketList *pkt1;
-  if (av_dup_packet(pkt) < 0)
-  {
-    return -1;
-  }
+  int ret;
+  // if (av_dup_packet(pkt) < 0)
+  // {
+  //   return -1;
+  // }
   pkt1 = av_malloc(sizeof(AVPacketList));
   if (!pkt1)
     return -1;
-  pkt1->pkt = *pkt;
-  pkt1->next = NULL;
+
+  if ((ret = av_packet_ref(&pkt1->pkt, pkt) < 0))
+  {
+    av_free(pkt1);
+    return -1;
+  }
+  // pkt1->pkt = *pkt;
+  // pkt1->next = NULL;
 
   SDL_LockMutex(q->mutex);
 
@@ -160,6 +167,7 @@ int audio_decode_frame(AVCodecContext *aCodecCtx, uint8_t *audio_buf, int buf_si
       /* We have data, return it and come back for more later */
       return data_size;
     }
+
     if (pkt.data)
       av_packet_unref(&pkt);
 
@@ -179,7 +187,7 @@ int audio_decode_frame(AVCodecContext *aCodecCtx, uint8_t *audio_buf, int buf_si
 
 /**
  * stream是声音数据，len是声音长度
- */ 
+ */
 void audio_callback(void *userdata, Uint8 *stream, int len)
 {
 
@@ -259,12 +267,14 @@ int main(int argc, char *argv[])
   if (avformat_open_input(&pFormatCtx, src_filename, NULL, NULL) != 0)
   {
     fprintf(stderr, "Couldn't open file.\n");
+    pFormatCtx = NULL;
     return -1;
   }
   // 检索流信息
   if (avformat_find_stream_info(pFormatCtx, NULL) < 0)
   {
     fprintf(stderr, "Couldn't find stream information.\n");
+    avformat_close_input(&pFormatCtx);
     return -1;
   }
 
@@ -305,6 +315,7 @@ int main(int argc, char *argv[])
   if (aCodec == NULL)
   {
     fprintf(stderr, "Unsupported audio codec!\n");
+    avformat_close_input(&pFormatCtx);
     return -1;
   }
   // 从音频流中获得编解码器上下文的指针
@@ -312,6 +323,7 @@ int main(int argc, char *argv[])
   if (!aCodecCtx)
   {
     fprintf(stderr, "Failed to allocate the audio codec context\n");
+    avformat_close_input(&pFormatCtx);
     return -1;
   }
   // 复制输入流的编解码器的参数到输出编解码器上下文中
@@ -319,6 +331,7 @@ int main(int argc, char *argv[])
   {
     fprintf(stderr, "Failed to copy codec parameters to decoder context\n");
     avformat_close_input(&pFormatCtx);
+    avcodec_free_context(&aCodecCtx);
     return -1;
   }
 
@@ -341,6 +354,8 @@ int main(int argc, char *argv[])
   if (avcodec_open2(aCodecCtx, aCodec, &audioOptionsDict) < 0)
   {
     fprintf(stderr, "Could not open audio codec!\n");
+    avcodec_free_context(&aCodecCtx);
+    avformat_close_input(&pFormatCtx);
     return -1;
   }
 

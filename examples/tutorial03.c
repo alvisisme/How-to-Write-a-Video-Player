@@ -185,6 +185,73 @@ int audio_decode_frame(AVCodecContext *aCodecCtx, uint8_t *audio_buf, int buf_si
   }
 }
 
+int audio_decode_frame2(AVCodecContext *aCodecCtx, uint8_t *audio_buf, int buf_size)
+{
+  static AVPacket pkt;
+  static uint8_t *audio_pkt_data = NULL;
+  static int audio_pkt_size = 0;
+  static AVFrame frame;
+
+  int len1, data_size = 0;
+
+  for (;;)
+  {
+    while (audio_pkt_size > 0)
+    {
+      fprintf(stderr, "%d: start read audio packet %d\n", __LINE__, pkt.size);
+      int ret = avcodec_send_packet(aCodecCtx, &pkt);
+      fprintf(stdout, "%d: avcodec_send_packet %d\n", __LINE__, ret);
+      if (ret < 0)
+      {
+        fprintf(stderr, "Error sending a packet for decoding\n");
+        audio_pkt_size = 0;
+        break;
+      }
+      audio_pkt_data += pkt.size;
+      audio_pkt_size -= pkt.size;
+      
+      while (ret >= 0)
+      {
+        ret = avcodec_receive_frame(aCodecCtx, &frame);
+        fprintf(stdout, "%d: avcodec_receive_frame %d\n", __LINE__, ret);
+
+        exit(1);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        {
+          // audio_pkt_size = 0;
+          fprintf(stderr, "%d: avcodec_receive_frame error %d\n", __LINE__, ret);
+          continue;
+        }
+        else if (ret < 0)
+        {
+          fprintf(stderr, "Error during decoding\n");
+          audio_pkt_size = 0;
+          break;
+        }
+      }
+      // return data_size;
+    }
+
+    if (pkt.data)
+    {
+      av_packet_unref(&pkt);
+    }
+    if (quit)
+    {
+      return -1;
+    }
+    fprintf(stderr, "%d: packet_queue_get\n", __LINE__);
+    if (packet_queue_get(&audioq, &pkt, 1) < 0)
+    {
+      fprintf(stderr, "%d: packet_queue_get error\n", __LINE__);
+      return -1;
+    }
+    fprintf(stderr, "%d: packet_queue_get success\n", __LINE__);
+    audio_pkt_data = pkt.data;
+    audio_pkt_size = pkt.size;
+    fprintf(stderr, "%d: get packet size %d\n", __LINE__, audio_pkt_size);
+  }
+}
 /**
  * stream是声音数据，len是声音长度
  */
@@ -202,8 +269,10 @@ void audio_callback(void *userdata, Uint8 *stream, int len)
   {
     if (audio_buf_index >= audio_buf_size)
     {
+      // 读取　audio_buf 大小的音频数据
       /* We have already sent all our data; get more */
-      audio_size = audio_decode_frame(aCodecCtx, audio_buf, audio_buf_size);
+      audio_size = audio_decode_frame2(aCodecCtx, audio_buf, audio_buf_size);
+      printf("%d: size %d buf size %d \n", __LINE__, audio_size, audio_buf_size);
       if (audio_size < 0)
       {
         /* If error, output silence */
@@ -216,9 +285,13 @@ void audio_callback(void *userdata, Uint8 *stream, int len)
       }
       audio_buf_index = 0;
     }
+    //
     len1 = audio_buf_size - audio_buf_index;
     if (len1 > len)
+    {
       len1 = len;
+    }
+    // 最终目的就是往　stream　里写入　audio buffer 数据
     memcpy(stream, (uint8_t *)audio_buf + audio_buf_index, len1);
     len -= len1;
     stream += len1;
@@ -279,7 +352,7 @@ int main(int argc, char *argv[])
   }
 
   // 将运行过程中的信息全部输出到标准错误中
-  av_dump_format(pFormatCtx, 0, argv[1], 0);
+  // av_dump_format(pFormatCtx, 0, argv[1], 0);
 
   // 找到视频流和音频流
   videoStream = -1;
@@ -488,7 +561,28 @@ int main(int argc, char *argv[])
     }
     else if (packet.stream_index == audioStream)
     {
-      packet_queue_put(&audioq, &packet);
+       int ret;
+      ret = avcodec_send_packet(aCodecCtx, &packet);
+      if (ret < 0)
+      {
+        fprintf(stderr, "Error sending a packet for decoding\n");
+        exit(1);
+      }
+      while (ret >= 0)
+      {
+        ret = avcodec_receive_frame(aCodecCtx, pFrame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        {
+          break;
+        }
+        else if (ret < 0)
+        {
+          fprintf(stderr, "Error during decoding\n");
+          exit(1);
+        }
+        
+      }
+      // packet_queue_put(&audioq, &packet);
     }
     else
     {

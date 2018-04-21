@@ -22,9 +22,9 @@ static const char *src_filename = NULL;
 
 void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame)
 {
-  FILE *pFile;
-  char szFilename[32];
-  int y;
+  FILE *pFile = NULL;
+  char szFilename[32] = {0,};
+  int y = 0;
 
   // 打开输出ppm文件
   sprintf(szFilename, "frame%d.ppm", iFrame);
@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
     return -1;
   }
   src_filename = argv[1];
-  // 初始化libavformat并注册所有的封装器，解封装器等
+  // 初始化libavformat库
   av_register_all();
 
   // 打开视频文件输入流，必须使用avformat_close_input关闭文件流
